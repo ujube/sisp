@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { parseArgs } = require("../src/cli");
+const { parseArgs, parseCliArgs } = require("../src/cli");
+const { parseInstallArgs } = require("../src/install-command");
 
 test("parses before mode keyword", () => {
   const options = parseArgs(["before", "./demo"]);
@@ -19,4 +20,19 @@ test("parses after mode flag", () => {
 
 test("rejects conflicting scan mode flags", () => {
   assert.throws(() => parseArgs(["--before", "--after"]), /Conflicting scan modes/);
+});
+
+test("parses install subcommand", () => {
+  const options = parseCliArgs(["install", "demo-package"]);
+
+  assert.equal(options.command, "install");
+  assert.deepEqual(options.packageSpecs, ["demo-package"]);
+});
+
+test("parses install dry-run and forwarded args", () => {
+  const options = parseInstallArgs(["demo-package", "--dry-run", "--", "--save-dev"]);
+
+  assert.equal(options.dryRun, true);
+  assert.deepEqual(options.packageSpecs, ["demo-package"]);
+  assert.deepEqual(options.npmArgs, ["--save-dev"]);
 });

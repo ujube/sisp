@@ -32,6 +32,18 @@ After install:
 sisp after
 ```
 
+Preflight-check a package before installing it:
+
+```bash
+sisp install package-name --dry-run
+```
+
+Check first, then let SISP run `npm install` and follow it with a post-install scan:
+
+```bash
+sisp install package-name
+```
+
 Scan another project:
 
 ```bash
@@ -45,11 +57,25 @@ JSON output:
 sisp after --json
 ```
 
+Forward npm install flags after `--`:
+
+```bash
+sisp install package-name -- --save-dev
+```
+
 ## Scan Modes
 
 - `before`: checks project metadata and lockfile signals before install
 - `after`: also inspects installed dependencies inside `node_modules`
 - `auto`: default mode; uses `after` if `node_modules` exists, otherwise `before`
+
+## Install Preflight
+
+- `sisp install <package-spec...>` checks npm registry metadata before running `npm install`
+- `--dry-run` stops after the preflight report and does not change your project
+- Blocking findings stop the install
+- Review findings are shown in the report, but `npm install` still runs in this v1 workflow
+- Use `--` to forward extra npm install flags such as `--save-dev`
 
 ## What It Checks
 
@@ -60,6 +86,9 @@ sisp after --json
 - Warn when no npm lockfile exists
 - If `node_modules` already exists, inspect installed dependencies for `preinstall`, `install`, and `postinstall` scripts
 - If `package-lock.json` exists, read `hasInstallScript` and source type signals such as `git`, `file:`, `link:`, and remote tarball specs
+- In `sisp install`, read npm metadata for the requested packages before install
+- In `sisp install`, flag requested package specs that use non-standard sources such as `git`, `file:`, `link:`, aliases, or direct tarballs
+- In `sisp install`, inspect published install scripts, native build indicators, missing repository URLs, integrity metadata, and dependency source risks before install
 
 ## Example Output
 
