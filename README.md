@@ -87,5 +87,3 @@ npm test
 
 - GitHub Releases can use auto-generated release notes through `.github/release.yml`
 - Release history is tracked in `CHANGELOG.md`
-
-Project notes and earlier architecture ideas are in `structure.md` and `structure/`.
