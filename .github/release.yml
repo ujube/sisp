@@ -1,0 +1,25 @@
+changelog:
+  categories:
+    - title: Features
+      labels:
+        - feature
+        - enhancement
+    - title: Detection Rules
+      labels:
+        - detection
+        - security
+    - title: CLI and UX
+      labels:
+        - cli
+        - ux
+    - title: Documentation
+      labels:
+        - documentation
+        - docs
+    - title: Tests and Maintenance
+      labels:
+        - test
+        - maintenance
+  exclude:
+    labels:
+      - skip-release-notes

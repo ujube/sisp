@@ -83,10 +83,9 @@ What to do next:
 npm test
 ```
 
-## Roadmap
+## Releases
 
-- v1: solid npm pre-scan and JSON output
-- v2: optional deep scan with Docker
-- v3: stronger runtime telemetry if the simple UX still holds
+- GitHub Releases can use auto-generated release notes through `.github/release.yml`
+- Release history is tracked in `CHANGELOG.md`
 
 Project notes and earlier architecture ideas are in `structure.md` and `structure/`.
