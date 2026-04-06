@@ -2,7 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const path = require("path");
 const { inspectRequestedPackages } = require("../src/install-command");
-const { formatInstallPreflightReport, runCli } = require("../src/cli");
+const { formatInstallReport, runCli } = require("../src/cli");
 
 function createExecStub(responses) {
   return (command, args) => {
@@ -56,9 +56,10 @@ test("marks suspicious registry install scripts as BLOCK", () => {
   assert.ok(report.reasons.some((reason) => reason.code === "package-suspicious-install-scripts"));
 });
 
-test("formats install preflight in plain English", () => {
-  const output = formatInstallPreflightReport({
+test("formats install workflow output in plain English", () => {
+  const output = formatInstallReport({
     targetPath: "/tmp/project",
+    installMode: "packages",
     packageSpecs: ["demo-package"],
     score: 0.35,
     verdict: "REVIEW",
@@ -71,12 +72,12 @@ test("formats install preflight in plain English", () => {
     notes: []
   }, { willInstall: true, dryRun: false });
 
-  assert.match(output, /SISP install preflight/);
+  assert.match(output, /SISP install/);
   assert.match(output, /Decision: Review these packages before continuing/);
-  assert.match(output, /Requested packages run code during install/);
+  assert.match(output, /Packages in this install request run code during install/);
 });
 
-test("runCli install dry-run prints preflight without running npm install", () => {
+test("runCli install dry-run prints install check output without running npm install", () => {
   const fixtureDir = path.join(__dirname, "fixtures", "safe-project");
   const stdout = [];
   let installCalled = false;
@@ -106,5 +107,27 @@ test("runCli install dry-run prints preflight without running npm install", () =
 
   assert.equal(exitCode, 0);
   assert.equal(installCalled, false);
-  assert.match(stdout.join(""), /SISP install preflight/);
+  assert.match(stdout.join(""), /SISP install/);
+});
+
+test("inspects current project dependencies when no package spec is passed", () => {
+  const fixtureDir = path.join(__dirname, "fixtures", "safe-project");
+  const execFileSync = createExecStub({
+    "npm config get registry": "https://registry.npmjs.org/\n",
+    "npm view react@^18.3.1 name version scripts repository homepage bugs dist.tarball dist.integrity dependencies gypfile --json": JSON.stringify({
+      name: "react",
+      version: "18.3.1",
+      repository: {
+        type: "git",
+        url: "git+https://github.com/facebook/react.git"
+      },
+      "dist.tarball": "https://registry.npmjs.org/react/-/react-18.3.1.tgz",
+      "dist.integrity": "sha512-demo"
+    })
+  });
+  const report = inspectRequestedPackages([], { cwd: fixtureDir, execFileSync });
+
+  assert.equal(report.installMode, "project");
+  assert.deepEqual(report.packageSpecs, ["react@^18.3.1"]);
+  assert.equal(report.verdict, "SAFE");
 });

@@ -8,13 +8,15 @@ The format is based on Keep a Changelog and this project follows Semantic Versio
 
 ### Added
 
-- `sisp install <package-spec...>` preflight command for npm registry metadata checks before install
-- `--dry-run` support for install preflight without changing the target project
+- `sisp install [package-spec...]` as the main install workflow for project installs and single-package installs
+- `--dry-run` support for install checks without changing the target project
 - Post-install follow-up scan after `sisp install` completes
+- `sisp scan` subcommand as a grouped form of the existing project scan modes
 
 ### Changed
 
-- CLI help and README now document install preflight and forwarded npm install args
+- CLI help and README now present `sisp install` as the primary user workflow
+- Install output is now presented as one install flow instead of a separate check phase
 
 ## [0.1.0] - 2026-04-06
 

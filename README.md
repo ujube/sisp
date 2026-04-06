@@ -1,8 +1,8 @@
 # SISP
 
-A lightweight CLI that helps detect risky npm dependency behavior before and after install.
+SISP is a lightweight npm install wrapper that checks dependency metadata before install and scans the project again after install.
 
-SISP reads `package.json`, `package-lock.json`, and optionally `node_modules`, then gives you a simple verdict before or after `npm install`.
+Instead of running plain `npm install`, you can let SISP inspect the packages involved, flag install-time risk signals, continue with `npm install` when the result looks acceptable, and then show you the post-install state of the project.
 
 ## Install
 
@@ -12,70 +12,75 @@ Global install from GitHub:
 npm install -g github:ujube/sisp
 ```
 
-Then run:
+## Main Workflow
+
+Install the dependencies already listed in the current project's `package.json`:
 
 ```bash
-sisp
+sisp install
 ```
 
-## Quick Start
-
-Before install:
-
-```bash
-sisp before
-```
-
-After install:
-
-```bash
-sisp after
-```
-
-Preflight-check a package before installing it:
+Check a package first without changing the project:
 
 ```bash
 sisp install package-name --dry-run
 ```
 
-Check first, then let SISP run `npm install` and follow it with a post-install scan:
+Install a specific package through SISP:
 
 ```bash
 sisp install package-name
 ```
 
-Scan another project:
-
-```bash
-sisp before /path/to/project
-sisp after /path/to/project
-```
-
-JSON output:
-
-```bash
-sisp after --json
-```
-
-Forward npm install flags after `--`:
+Forward extra npm install flags after `--`:
 
 ```bash
 sisp install package-name -- --save-dev
 ```
 
-## Scan Modes
+## How `sisp install` Works
 
+1. SISP decides which packages this install would use.
+2. It reads npm metadata for those packages before install.
+3. It checks source type, install scripts, suspicious install commands, native build signals, repository metadata, integrity metadata, and dependency source risks.
+4. If the result is blocking, `npm install` does not start.
+5. If the result is acceptable, SISP runs `npm install`.
+6. After install finishes, SISP scans the project again and shows the resulting state.
+
+This means one command can cover both:
+- the package you are about to install
+- the project state after install finishes
+
+## Scan Commands
+
+SISP still supports direct project scans when you want them:
+
+```bash
+sisp scan
+sisp scan before
+sisp scan after
+sisp before
+sisp after
+```
+
+Scan another project:
+
+```bash
+sisp scan before /path/to/project
+sisp scan after /path/to/project
+```
+
+JSON output:
+
+```bash
+sisp install --json
+sisp scan after --json
+```
+
+Scan modes:
 - `before`: checks project metadata and lockfile signals before install
 - `after`: also inspects installed dependencies inside `node_modules`
 - `auto`: default mode; uses `after` if `node_modules` exists, otherwise `before`
-
-## Install Preflight
-
-- `sisp install <package-spec...>` checks npm registry metadata before running `npm install`
-- `--dry-run` stops after the preflight report and does not change your project
-- Blocking findings stop the install
-- Review findings are shown in the report, but `npm install` still runs in this v1 workflow
-- Use `--` to forward extra npm install flags such as `--save-dev`
 
 ## What It Checks
 
@@ -86,31 +91,30 @@ sisp install package-name -- --save-dev
 - Warn when no npm lockfile exists
 - If `node_modules` already exists, inspect installed dependencies for `preinstall`, `install`, and `postinstall` scripts
 - If `package-lock.json` exists, read `hasInstallScript` and source type signals such as `git`, `file:`, `link:`, and remote tarball specs
-- In `sisp install`, read npm metadata for the requested packages before install
-- In `sisp install`, flag requested package specs that use non-standard sources such as `git`, `file:`, `link:`, aliases, or direct tarballs
+- In `sisp install`, read npm metadata for the packages involved before install starts
+- In `sisp install`, flag non-standard package specs such as `git`, `file:`, `link:`, aliases, or direct tarballs
 - In `sisp install`, inspect published install scripts, native build indicators, missing repository URLs, integrity metadata, and dependency source risks before install
 
 ## Example Output
 
 ```text
-SISP scan: block-project
+SISP install
 Target: /path/to/project
-Decision: Stop and inspect before you install
-Risk level: BLOCK (1.00)
+Requested scope: current project dependencies (2 direct)
+Decision: Review these packages before continuing
+Risk level: REVIEW (0.35)
 
 What this means:
-This project shows high-risk install behavior or dependency sources. That does not prove malware, but it is risky enough that you should stop and verify the changes before running install.
+SISP checked the packages this install would use before running npm install. No blocking signals were found.
 
 What SISP found:
-- The project itself runs code during install: postinstall.
-- The project has an install command that may fetch or execute code: postinstall uses curl.
-- Some dependencies come from non-standard sources such as git, local paths, or direct tarballs: bad-lib [git].
-- No npm lockfile was found, so install results may change more easily between runs.
+- Packages in this install request run code during install: esbuild@0.28.0 (postinstall).
+- Some packages in this install request do not publish a source repository URL: example-package@1.2.3.
 
 What to do next:
-- Check the new or changed dependencies in package.json and package-lock.json before running install.
-- Look closely at packages that run install scripts or come from git, local paths, or direct tarball URLs.
-- If these changes were not expected, stop here and inspect the dependency update in code review.
+- Let npm install finish, then read the post-install scan that follows.
+- If a package looks unfamiliar, inspect its npm metadata and published repository before keeping it in the project.
+- Use --dry-run first when you want the install decision without changing dependencies.
 ```
 
 ## Development

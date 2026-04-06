@@ -1,4 +1,6 @@
 const childProcess = require("child_process");
+const fs = require("fs");
+const path = require("path");
 const {
   findDirectSourceRisks,
   findNativeBuildIndicators,
@@ -7,6 +9,7 @@ const {
 const { pickVerdict } = require("./risk-engine");
 
 const INSTALL_SCRIPT_NAMES = ["preinstall", "install", "postinstall"];
+const INSTALL_DEPENDENCY_SECTIONS = ["dependencies", "devDependencies", "optionalDependencies"];
 const INSTALL_SOURCE_WEIGHTS = {
   alias: 0.15,
   "local-file": 0.2,
@@ -86,10 +89,6 @@ function parseInstallArgs(argv) {
     options.packageSpecs.push(arg);
   }
 
-  if (!options.help && options.packageSpecs.length === 0) {
-    throw new Error("Install mode requires at least one package spec");
-  }
-
   return options;
 }
 
@@ -97,17 +96,19 @@ function inspectRequestedPackages(packageSpecs, options = {}) {
   const cwd = options.cwd || process.cwd();
   const execFileSync = options.execFileSync || childProcess.execFileSync;
   const registryUrl = readConfiguredRegistry(cwd, execFileSync);
-  const packageChecks = packageSpecs.map((spec) =>
-    inspectSinglePackage(spec, { cwd, execFileSync, registryUrl })
+  const requests = normalizeInstallRequests(packageSpecs, cwd);
+  const packageChecks = requests.map((request) =>
+    inspectSinglePackage(request, { cwd, execFileSync, registryUrl })
   );
   const risk = evaluateInstallRisk(packageChecks);
 
   return {
     targetPath: cwd,
     registryUrl,
-    packageSpecs: [...packageSpecs],
+    installMode: requests.length > 0 && packageSpecs.length === 0 ? "project" : "packages",
+    packageSpecs: requests.map((request) => request.requestedSpec),
     packageChecks,
-    notes: buildInstallNotes(packageChecks),
+    notes: buildInstallNotes(packageChecks, requests.length > 0 && packageSpecs.length === 0),
     score: risk.score,
     verdict: risk.verdict,
     reasons: risk.reasons
@@ -138,15 +139,15 @@ function runNpmInstall(packageSpecs, npmArgs, options = {}) {
   };
 }
 
-function inspectSinglePackage(spec, options) {
-  const requestedSourceType = classifySourceFromText(spec) || "registry";
+function inspectSinglePackage(request, options) {
+  const requestedSourceType = request.requestedSourceType || "registry";
 
   if (requestedSourceType !== "registry" && requestedSourceType !== "alias") {
     return {
-      requestedSpec: spec,
+      requestedSpec: request.requestedSpec,
       requestedSourceType,
       metadataAvailable: false,
-      packageName: requestedDisplayName(spec),
+      packageName: request.packageName,
       version: null,
       repositoryUrl: null,
       homepage: null,
@@ -163,15 +164,15 @@ function inspectSinglePackage(spec, options) {
   }
 
   try {
-    const metadata = readPackageView(spec, options.cwd, options.execFileSync);
+    const metadata = readPackageView(request.lookupSpec, options.cwd, options.execFileSync);
     const dependencies = collectMetadataDependencies(metadata.dependencies);
     const installScripts = findInstallScripts(metadata.scripts || {});
 
     return {
-      requestedSpec: spec,
+      requestedSpec: request.requestedSpec,
       requestedSourceType,
       metadataAvailable: true,
-      packageName: metadata.name || requestedDisplayName(spec),
+      packageName: metadata.name || request.packageName,
       version: metadata.version || null,
       repositoryUrl: extractRepositoryUrl(metadata.repository),
       homepage: metadata.homepage || null,
@@ -190,10 +191,10 @@ function inspectSinglePackage(spec, options) {
     };
   } catch (error) {
     return {
-      requestedSpec: spec,
+      requestedSpec: request.requestedSpec,
       requestedSourceType,
       metadataAvailable: false,
-      packageName: requestedDisplayName(spec),
+      packageName: request.packageName,
       version: null,
       repositoryUrl: null,
       homepage: null,
@@ -358,11 +359,67 @@ function evaluateInstallRisk(packageChecks) {
   };
 }
 
-function buildInstallNotes(packageChecks) {
+function normalizeInstallRequests(packageSpecs, cwd) {
+  if (packageSpecs.length > 0) {
+    return packageSpecs.map((spec) => createInstallRequestFromSpec(spec));
+  }
+
+  return collectProjectInstallRequests(cwd);
+}
+
+function collectProjectInstallRequests(cwd) {
+  const packageJsonPath = path.join(cwd, "package.json");
+  if (!fs.existsSync(packageJsonPath)) {
+    throw new Error("package.json not found in the current project. Pass a package spec or run this command inside an npm project.");
+  }
+
+  const pkg = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+  const requests = [];
+  const seen = new Set();
+
+  for (const section of INSTALL_DEPENDENCY_SECTIONS) {
+    for (const [packageName, spec] of Object.entries(pkg[section] || {})) {
+      if (seen.has(packageName)) {
+        continue;
+      }
+
+      seen.add(packageName);
+      requests.push(createInstallRequestFromDependency(packageName, spec, section));
+    }
+  }
+
+  return requests;
+}
+
+function createInstallRequestFromSpec(spec) {
+  return {
+    requestedSpec: spec,
+    lookupSpec: spec,
+    packageName: requestedDisplayName(spec),
+    requestedSourceType: classifySourceFromText(extractSourceSpecifier(spec)) || "registry",
+    section: "requested"
+  };
+}
+
+function createInstallRequestFromDependency(packageName, spec, section) {
+  return {
+    requestedSpec: `${packageName}@${spec}`,
+    lookupSpec: `${packageName}@${spec}`,
+    packageName,
+    requestedSourceType: classifySourceFromText(spec) || "registry",
+    section
+  };
+}
+
+function buildInstallNotes(packageChecks, projectMode = false) {
   const notes = [];
   const metadataSkipped = packageChecks.filter(
     (item) => !item.metadataAvailable && !item.metadataError && item.requestedSourceType !== "registry"
   );
+
+  if (projectMode && packageChecks.length === 0) {
+    notes.push("No direct dependencies were found in package.json, so SISP did not need to query npm package metadata before running npm install.");
+  }
 
   if (metadataSkipped.length > 0) {
     notes.push(
@@ -499,6 +556,20 @@ function requestedDisplayName(spec) {
   return atIndex === -1 ? spec : spec.slice(0, atIndex);
 }
 
+function extractSourceSpecifier(spec) {
+  if (typeof spec !== "string") {
+    return "";
+  }
+
+  if (spec.startsWith("@")) {
+    const secondAt = spec.indexOf("@", 1);
+    return secondAt === -1 ? spec : spec.slice(secondAt + 1);
+  }
+
+  const atIndex = spec.indexOf("@");
+  return atIndex === -1 ? spec : spec.slice(atIndex + 1);
+}
+
 function classifySourceFromText(value) {
   if (typeof value !== "string") {
     return null;
@@ -537,6 +608,7 @@ module.exports = {
   evaluateInstallRisk,
   findInstallScripts,
   inspectRequestedPackages,
+  normalizeInstallRequests,
   parseInstallArgs,
   runNpmInstall
 };
