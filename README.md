@@ -1,51 +1,48 @@
 # SISP
 
-Simple install security pre-scan for npm projects.
+A lightweight CLI that helps detect risky npm dependency behavior before and after install.
 
-Current scope is intentionally small: SISP reads `package.json`, `package-lock.json`, and optionally `node_modules`, then returns a simple verdict before or after you run `npm install`.
+SISP reads `package.json`, `package-lock.json`, and optionally `node_modules`, then gives you a simple verdict before or after `npm install`.
 
-## v0 Scope
+## Install
 
-- Scan `preinstall`, `install`, `postinstall`, and `prepare` scripts
-- Flag suspicious install commands such as `curl`, `wget`, `bash`, or `node -e`
-- Flag git-based dependencies
-- Flag local `file:` and `link:` dependencies
-- Flag native build indicators such as `node-gyp`
-- Warn when no npm lockfile exists
-- If `node_modules` already exists, inspect installed dependencies for `preinstall`, `install`, and `postinstall` scripts
-- If `package-lock.json` exists, read `hasInstallScript` and source type signals such as `git`, `file:`, `link:`, and remote tarball specs
-
-## Usage
+Global install from GitHub:
 
 ```bash
-node ./bin/sisp.js
-node ./bin/sisp.js --json
-node ./bin/sisp.js --before
-node ./bin/sisp.js --after
-node ./bin/sisp.js ./some-project
+npm install -g github:ujube/sisp
 ```
 
-After installing the package locally or globally:
+Then run:
 
 ```bash
 sisp
+```
+
+## Quick Start
+
+Before install:
+
+```bash
 sisp before
+```
+
+After install:
+
+```bash
 sisp after
-sisp after ./some-project
 ```
 
-## Global Install
-
-For local development:
+Scan another project:
 
 ```bash
-npm link
+sisp before /path/to/project
+sisp after /path/to/project
 ```
 
-For a direct global install:
+JSON output:
 
 ```bash
-npm install -g /path/to/sisp
+sisp after --json
 ```
 
 ## Scan Modes
@@ -53,6 +50,16 @@ npm install -g /path/to/sisp
 - `before`: checks project metadata and lockfile signals before install
 - `after`: also inspects installed dependencies inside `node_modules`
 - `auto`: default mode; uses `after` if `node_modules` exists, otherwise `before`
+
+## What It Checks
+
+- Scan `preinstall`, `install`, `postinstall`, and `prepare` scripts
+- Flag suspicious install commands such as `curl`, `wget`, `bash`, or `node -e`
+- Flag non-standard dependency sources such as `git`, `file:`, `link:`, and remote tarballs
+- Flag native build indicators such as `node-gyp`
+- Warn when no npm lockfile exists
+- If `node_modules` already exists, inspect installed dependencies for `preinstall`, `install`, and `postinstall` scripts
+- If `package-lock.json` exists, read `hasInstallScript` and source type signals such as `git`, `file:`, `link:`, and remote tarball specs
 
 ## Example Output
 
@@ -79,8 +86,16 @@ What to do next:
 
 ## Development
 
+Run the test suite:
+
 ```bash
 npm test
+```
+
+Link the local checkout as a global command while developing:
+
+```bash
+npm link
 ```
 
 ## Releases
