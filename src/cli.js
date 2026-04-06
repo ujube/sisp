@@ -1,8 +1,13 @@
 const path = require("path");
 const { scanProject } = require("./scan-project");
+const {
+  inspectRequestedPackages,
+  parseInstallArgs,
+  runNpmInstall
+} = require("./install-command");
 
-function runCli(argv, { cwd, stdout, stderr }) {
-  const options = parseArgs(argv);
+function runCli(argv, { cwd, stdout, stderr, execFileSync, spawnSync }) {
+  const options = parseCliArgs(argv);
 
   if (options.help) {
     stdout.write(`${buildHelp()}\n`);
@@ -10,6 +15,10 @@ function runCli(argv, { cwd, stdout, stderr }) {
   }
 
   try {
+    if (options.command === "install") {
+      return runInstallWorkflow(options, { cwd, stdout, stderr, execFileSync, spawnSync });
+    }
+
     const targetPath = path.resolve(cwd, options.targetPath || ".");
     const report = scanProject(targetPath, { mode: options.scanMode });
 
@@ -24,6 +33,27 @@ function runCli(argv, { cwd, stdout, stderr }) {
     stderr.write(`SISP error: ${error.message}\n`);
     return 1;
   }
+}
+
+function parseCliArgs(argv) {
+  if (argv[0] === "install") {
+    return {
+      command: "install",
+      ...parseInstallArgs(argv.slice(1))
+    };
+  }
+
+  if (argv[0] === "scan") {
+    return {
+      command: "scan",
+      ...parseArgs(argv.slice(1))
+    };
+  }
+
+  return {
+    command: "scan",
+    ...parseArgs(argv)
+  };
 }
 
 function parseArgs(argv) {
@@ -93,14 +123,23 @@ function isScanModeKeyword(value) {
 
 function buildHelp() {
   return [
-    "SISP v0.1.0",
+    "SISP v0.2.0",
     "",
     "Usage:",
+    "  sisp install [package-spec...] [--json] [--dry-run] [-- <npm install args>]",
+    "  sisp scan [path] [--before|--after|--auto] [--json]",
+    "  sisp scan before [path] [--json]",
+    "  sisp scan after [path] [--json]",
     "  sisp [path] [--before|--after|--auto] [--json]",
     "  sisp before [path] [--json]",
     "  sisp after [path] [--json]",
     "",
     "Examples:",
+    "  sisp install",
+    "  sisp install package-name",
+    "  sisp install package-name -- --save-dev",
+    "  sisp scan",
+    "  sisp scan after ./some-project",
     "  sisp",
     "  sisp before",
     "  sisp after ./some-project",
@@ -150,6 +189,217 @@ function formatReport(report) {
   }
 
   return lines.join("\n");
+}
+
+function runInstallWorkflow(options, { cwd, stdout, stderr, execFileSync, spawnSync }) {
+  const installCheck = inspectRequestedPackages(options.packageSpecs, { cwd, execFileSync });
+
+  if (installCheck.verdict === "BLOCK") {
+    if (options.json) {
+      stdout.write(`${JSON.stringify({ installCheck, install: null, afterScan: null }, null, 2)}\n`);
+    } else {
+      stdout.write(`${formatInstallReport(installCheck, { willInstall: false, dryRun: options.dryRun })}\n`);
+    }
+
+    return 1;
+  }
+
+  if (options.dryRun) {
+    if (options.json) {
+      stdout.write(`${JSON.stringify({ installCheck, install: null, afterScan: null }, null, 2)}\n`);
+    } else {
+      stdout.write(`${formatInstallReport(installCheck, { willInstall: false, dryRun: true })}\n`);
+    }
+
+    return 0;
+  }
+
+  if (!options.json) {
+    stdout.write(`${formatInstallReport(installCheck, { willInstall: true, dryRun: false })}\n\n`);
+    stdout.write(`Running: ${buildInstallCommandSummary(options)}\n\n`);
+  }
+
+  const install = runNpmInstall(options.packageSpecs, options.npmArgs, {
+    cwd,
+    spawnSync,
+    stdio: options.json ? "pipe" : "inherit"
+  });
+
+  if (install.status !== 0) {
+    if (options.json) {
+      stdout.write(`${JSON.stringify({ installCheck, install, afterScan: null }, null, 2)}\n`);
+    } else {
+      stderr.write(`SISP error: npm install failed with exit code ${install.status}\n`);
+    }
+
+    return install.status || 1;
+  }
+
+  const afterScan = scanProject(path.resolve(cwd), { mode: "after" });
+
+  if (options.json) {
+    stdout.write(`${JSON.stringify({ installCheck, install, afterScan }, null, 2)}\n`);
+  } else {
+    stdout.write(`\nPost-install scan:\n${formatReport(afterScan)}\n`);
+  }
+
+  return afterScan.verdict === "BLOCK" ? 1 : 0;
+}
+
+function formatInstallReport(report, options = {}) {
+  const decision = buildInstallDecisionSummary(report);
+  const explanation = buildInstallExplanation(report, options);
+  const findings = buildHumanInstallFindings(report);
+  const nextSteps = buildInstallNextSteps(report, options);
+  const lines = [
+    "SISP install",
+    `Target: ${report.targetPath}`,
+    `Requested scope: ${formatInstallScope(report)}`,
+    `Decision: ${decision.title}`,
+    `Risk level: ${report.verdict} (${report.score.toFixed(2)})`,
+    "",
+    "What this means:",
+    explanation
+  ];
+
+  if (findings.length > 0) {
+    lines.push("");
+    lines.push("What SISP found:");
+    for (const finding of findings) {
+      lines.push(`- ${finding}`);
+    }
+  } else {
+    lines.push("");
+    lines.push("What SISP found:");
+    lines.push("- No strong npm metadata or install-time risk signals were detected for this install request.");
+  }
+
+  for (const note of report.notes) {
+    lines.push(`- ${note}`);
+  }
+
+  lines.push("");
+  lines.push("What to do next:");
+  for (const step of nextSteps) {
+    lines.push(`- ${step}`);
+  }
+
+  return lines.join("\n");
+}
+
+function buildInstallDecisionSummary(report) {
+  if (report.verdict === "BLOCK") {
+    return {
+      title: "Stop and inspect before npm install runs"
+    };
+  }
+
+  if (report.verdict === "REVIEW") {
+    return {
+      title: "Review these packages before continuing"
+    };
+  }
+
+  return {
+    title: "Safe to install"
+  };
+}
+
+function buildInstallExplanation(report, options) {
+  if (report.verdict === "BLOCK") {
+    return "SISP checked the packages this install would use and found blocking install-time risk signals. npm install was not started.";
+  }
+
+  if (options.dryRun) {
+    return "SISP checked the packages this install would use without running npm install. Use this mode when you want an install decision without changing the project.";
+  }
+
+  if (report.verdict === "REVIEW") {
+    return "SISP found install-time or source signals worth a quick review. This v1 workflow only blocks stronger signals, so npm install will continue after this check.";
+  }
+
+  return "SISP checked the packages this install would use before running npm install. No blocking signals were found.";
+}
+
+function buildHumanInstallFindings(report) {
+  const findings = [];
+
+  for (const reason of report.reasons) {
+    const finding = humanizeInstallReason(reason);
+    if (finding) {
+      findings.push(finding);
+    }
+  }
+
+  return findings;
+}
+
+function humanizeInstallReason(reason) {
+  switch (reason.code) {
+    case "package-metadata-unavailable":
+      return `npm metadata could not be read for: ${extractDetails(reason.message)}.`;
+    case "requested-non-standard-source":
+      return `Some packages in this install request use non-standard sources such as git, local paths, or direct tarballs: ${extractDetails(reason.message)}.`;
+    case "package-install-scripts":
+      return `Packages in this install request run code during install: ${extractDetails(reason.message)}.`;
+    case "package-suspicious-install-scripts":
+      return `Packages in this install request contain install commands that may fetch or execute code: ${extractDetails(reason.message)}.`;
+    case "package-native-build-indicators":
+      return `Packages in this install request perform native build work: ${extractDetails(reason.message)}.`;
+    case "package-dependency-source-risks":
+      return `Packages in this install request depend on non-standard sources: ${extractDetails(reason.message)}.`;
+    case "package-source-unknown":
+      return `Some packages in this install request do not publish a source repository URL: ${extractDetails(reason.message)}.`;
+    case "package-missing-integrity":
+      return `Some packages in this install request do not expose integrity metadata: ${extractDetails(reason.message)}.`;
+    default:
+      return reason.message;
+  }
+}
+
+function buildInstallNextSteps(report, options) {
+  if (report.verdict === "BLOCK") {
+    return [
+      "Inspect the package version and metadata before retrying this install.",
+      "Avoid installing packages that fetch or execute remote code during install unless you trust the source and expected behavior.",
+      "If you still want to inspect without changing the project, rerun the same command with --dry-run."
+    ];
+  }
+
+  if (options.dryRun) {
+    return [
+      "If the findings look expected, rerun the same command without --dry-run to let SISP continue with npm install.",
+      "If anything looks unfamiliar, inspect the package metadata and published files before installing."
+    ];
+  }
+
+  if (report.verdict === "REVIEW") {
+    return [
+      "Let npm install finish, then read the post-install scan that follows.",
+      "If a package looks unfamiliar, inspect its npm metadata and published repository before keeping it in the project.",
+      "Use --dry-run first when you want the install decision without changing dependencies."
+    ];
+  }
+
+  return [
+    "Let npm install finish, then review the post-install scan for the full project state.",
+    "If you only want the install check next time, use --dry-run."
+  ];
+}
+
+function formatInstallScope(report) {
+  if (report.installMode === "project") {
+    return report.packageSpecs.length === 0
+      ? "current project dependencies (none found)"
+      : `current project dependencies (${report.packageSpecs.length} direct)`;
+  }
+
+  return report.packageSpecs.join(", ");
+}
+
+function buildInstallCommandSummary(options) {
+  const args = ["npm", "install", ...options.packageSpecs, ...options.npmArgs];
+  return args.join(" ");
 }
 
 function buildDecisionSummary(report) {
@@ -270,7 +520,10 @@ module.exports = {
   buildHelp,
   formatScanMode,
   runCli,
+  formatInstallReport,
   formatReport,
+  humanizeInstallReason,
   humanizeReason,
-  parseArgs
+  parseArgs,
+  parseCliArgs
 };
