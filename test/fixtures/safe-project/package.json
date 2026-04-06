@@ -1,0 +1,11 @@
+{
+  "name": "safe-project",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "test": "node --test"
+  },
+  "dependencies": {
+    "react": "^18.3.1"
+  }
+}

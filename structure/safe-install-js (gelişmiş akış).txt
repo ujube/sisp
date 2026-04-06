@@ -1,0 +1,54 @@
+#!/usr/bin/env node
+
+const { runSandbox } = require('./core/sandbox');
+const { calculateRisk, decision } = require('./core/riskEngine');
+
+console.log("🛡️ Safe Install v1");
+
+// 1. PreScan
+let hasPostinstall = false;
+try {
+  const pkg = require(process.cwd() + '/package.json');
+  if (pkg.scripts?.postinstall) {
+    hasPostinstall = true;
+    console.log("⚠️ postinstall script detected");
+  }
+} catch {}
+
+// 2. Sandbox run
+const result = runSandbox();
+
+if (!result.success) {
+  console.log("❌ Sandbox failed");
+  process.exit(1);
+}
+
+// 3. Fake runtime data (şimdilik)
+const runtimeData = {
+  hasPostinstall,
+  networkCalls: 0,
+  sensitiveFiles: 0,
+  obfuscation: false
+};
+
+// 4. Risk hesapla
+const score = calculateRisk(runtimeData);
+const action = decision(score);
+
+console.log("📊 Risk Score:", score);
+console.log("📌 Decision:", action);
+
+// 5. Karar
+if (action === "BLOCK") {
+  console.log("❌ Install blocked");
+  process.exit(1);
+}
+
+if (action === "WARN") {
+  console.log("⚠️ Risk detected but continuing...");
+}
+
+// 6. Gerçek install
+const { execSync } = require('child_process');
+console.log("🚀 Running real install...");
+execSync('npm install', { stdio: 'inherit' });

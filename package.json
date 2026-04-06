@@ -1,0 +1,21 @@
+{
+  "name": "sisp",
+  "version": "0.1.0",
+  "description": "Simple install security pre-scan for npm projects",
+  "type": "commonjs",
+  "bin": {
+    "sisp": "./bin/sisp.js"
+  },
+  "scripts": {
+    "start": "node ./bin/sisp.js",
+    "test": "node --test"
+  },
+  "keywords": [
+    "npm",
+    "security",
+    "cli",
+    "scan",
+    "install"
+  ],
+  "license": "MIT"
+}

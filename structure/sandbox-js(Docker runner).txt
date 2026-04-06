@@ -1,0 +1,37 @@
+const { execSync } = require('child_process');
+const path = require('path');
+const os = require('os');
+const fs = require('fs');
+
+function runSandbox() {
+  const projectPath = process.cwd();
+  const tempDir = path.join(os.tmpdir(), 'safe-install-' + Date.now());
+
+  // projeyi kopyala
+  fs.cpSync(projectPath, tempDir, { recursive: true });
+
+  console.log("📦 Sandbox klasörü:", tempDir);
+
+  const dockerCmd = `
+    docker run --rm \
+      --read-only \
+      --tmpfs /tmp \
+      --tmpfs /app/node_modules \
+      -v ${tempDir}:/app:ro \
+      -w /app \
+      --network bridge \
+      --cap-drop ALL \
+      --security-opt no-new-privileges \
+      node:18 \
+      sh -c "npm install --ignore-scripts=false"
+  `;
+
+  try {
+    execSync(dockerCmd, { stdio: 'inherit' });
+    return { success: true };
+  } catch (e) {
+    return { success: false, error: e };
+  }
+}
+
+module.exports = { runSandbox };

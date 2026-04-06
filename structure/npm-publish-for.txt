@@ -1,0 +1,21 @@
+## package.json - filename
+{
+  "name": "safe-install",
+  "version": "0.1.0",
+  "description": "Run npm install in a sandbox before trusting dependencies",
+  "bin": {
+    "safe-install": "./safe-install.js"
+  },
+  "scripts": {
+    "start": "node safe-install.js"
+  },
+  "keywords": [
+    "npm",
+    "security",
+    "sandbox",
+    "cli",
+    "dependency"
+  ],
+  "author": "i1.design",
+  "license": "MIT"
+}
